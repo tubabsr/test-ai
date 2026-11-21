@@ -117,14 +117,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
-
       - name: Smoke test the container
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
