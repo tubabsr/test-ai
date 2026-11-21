@@ -1,0 +1,68 @@
+# PrometheusRule (Prometheus Operator). Apply with: kubectl apply -f prometheus-rules.yaml
+# Assumes kube-state-metrics, cAdvisor metrics, and an http_requests_total counter.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sre-agent-slo-and-health
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: workload-health
+      rules:
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} restarted {{ $value | printf \"%.0f\" }} times in 15m"
+            runbook: "Check the last termination reason (OOMKilled, Error) and run the SRE agent for this namespace."
+
+        - alert: MemoryNearLimit
+          expr: |
+            max by (namespace, pod, container) (container_memory_working_set_bytes{container!=""})
+              / on (namespace, pod, container)
+            max by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
+              > 0.9
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} is above 90% of its memory limit"
+
+    - name: slo-burn
+      # 99.9% availability SLO gives a 0.1% error budget. A 14.4x burn exhausts a 30-day budget in about 2 days.
+      # Requiring both a long and a short window cuts false pages and clears quickly after recovery.
+      rules:
+        - alert: ErrorBudgetBurnFast
+          expr: |
+            (
+              sum by (namespace, service) (rate(http_requests_total{code=~"5.."}[1h]))
+                / sum by (namespace, service) (rate(http_requests_total[1h]))
+            ) > (14.4 * 0.001)
+            and
+            (
+              sum by (namespace, service) (rate(http_requests_total{code=~"5.."}[5m]))
+                / sum by (namespace, service) (rate(http_requests_total[5m]))
+            ) > (14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.service }} is burning its error budget about 14x too fast"
+            runbook: "Run the SRE agent over the last 30 minutes for this namespace, then review the RCA before acting."
+
+    - name: latency
+      rules:
+        - alert: P99LatencyHigh
+          expr: |
+            histogram_quantile(0.99,
+              sum by (namespace, service, le) (rate(http_request_duration_seconds_bucket[5m]))
+            ) > 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.service }} p99 latency above 1s for 10 minutes"

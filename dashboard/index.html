@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service health · SRE agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #EEF1F3;
+    --surface: #FBFCFD;
+    --ink: #18212B;
+    --ink-2: #4F5B67;
+    --rule: #D3DAE0;
+    --accent: #245C86;
+    --crit: #B42318;
+    --warn: #8A4B06;
+    --ok: #1E6B47;
+    --focus: #0B5CAB;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink);
+    font: 400 15px/1.5 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { padding: 24px; min-height: 100vh; }
+  main { max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  p { margin: 0; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .top { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: flex-end;
+    justify-content: space-between; padding-bottom: 20px; border-bottom: 1px solid var(--rule); }
+  .scope { color: var(--ink-2); margin-top: 4px; }
+  form.scope-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+  input, select { font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid #B9C4CD; border-radius: 4px; padding: 7px 10px; min-width: 150px; }
+  button { font: inherit; font-weight: 500; color: var(--surface); background: var(--accent);
+    border: 0; border-radius: 4px; padding: 9px 16px; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: progress; }
+
+  .strip { display: grid; grid-template-columns: repeat(4, 1fr); padding: 20px 0;
+    border-bottom: 1px solid var(--rule); }
+  .fig { padding: 0 20px; border-left: 1px solid var(--rule); }
+  .fig:first-child { padding-left: 0; border-left: 0; }
+  .fig .value { font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif;
+    font-size: 40px; font-weight: 500; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .fig .label { color: var(--ink-2); font-size: 13px; margin-top: 6px; }
+  .fig.crit .value { color: var(--crit); }
+  .fig.warn .value { color: var(--warn); }
+
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; padding: 24px 0; }
+  .panel { padding-bottom: 20px; min-width: 0; }
+  .panel.wide { grid-column: span 2; }
+  .panel.hero svg { height: 260px; }
+  svg { width: 100%; height: 200px; display: block; }
+  svg .grid { stroke: var(--rule); stroke-width: 1; }
+  svg .tick { fill: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+  svg .empty { fill: var(--ink-2); font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 3px;
+    margin-right: 6px; vertical-align: middle; background: var(--swatch); }
+
+  .incident { display: grid; grid-template-columns: 1.1fr 1fr; gap: 0 32px; padding: 24px 0;
+    border-top: 1px solid var(--rule); }
+  .incident[hidden] { display: none; }
+  .root { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+  .chip { display: inline-block; font-size: 12px; border: 1px solid currentColor; border-radius: 3px;
+    padding: 1px 7px; margin-right: 6px; color: var(--ink-2); }
+  ol.whys { padding-left: 20px; margin: 0; display: grid; gap: 10px; }
+  ol.whys li { padding-left: 4px; }
+  ol.whys li.open { color: var(--ink-2); }
+  .ev, .strong-line { font-size: 12px; color: var(--ink-2); margin: 6px 0 0; }
+  .strong-line { font-size: 15px; font-weight: 600; color: var(--ink); }
+  .rem { border-top: 1px solid var(--rule); padding: 12px 0; }
+  .rem:first-child { border-top: 0; padding-top: 0; }
+  pre { background: #E3E8EC; border-radius: 4px; padding: 10px 12px; overflow-x: auto;
+    font: 13px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; margin: 8px 0 0; }
+  ul.plain { padding-left: 18px; margin: 6px 0 0; color: var(--ink-2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--ink-2); font-weight: 500; }
+  .status { color: var(--ink-2); font-size: 13px; padding: 16px 0 0; }
+  .status.error { color: var(--crit); }
+  .dl { color: var(--accent); font-weight: 500; }
+
+  @media (max-width: 900px) {
+    .strip { grid-template-columns: 1fr 1fr; row-gap: 16px; }
+    .fig:nth-child(odd) { padding-left: 0; border-left: 0; }
+    .charts, .incident { grid-template-columns: 1fr; }
+    .panel.wide { grid-column: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <h1>Service health</h1>
+      <p class="scope" id="scope">Enter a namespace and workload to start.</p>
+    </div>
+    <form class="scope-form" id="scopeForm">
+      <label>Namespace
+        <input name="namespace" value="shop" required pattern="[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?" autocomplete="off">
+      </label>
+      <label>Workload
+        <input name="workload" value="checkout" required pattern="[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?" autocomplete="off">
+      </label>
+      <label>Window
+        <select name="minutes">
+          <option value="15">15 minutes</option>
+          <option value="30" selected>30 minutes</option>
+          <option value="60">60 minutes</option>
+        </select>
+      </label>
+      <button type="submit" id="runBtn">Analyze window</button>
+    </form>
+  </header>
+
+  <section class="strip" aria-label="Current values">
+    <div class="fig" id="figErr"><div class="value">·</div><div class="label">Error rate, latest</div></div>
+    <div class="fig" id="figP99"><div class="value">·</div><div class="label">p99 latency, latest</div></div>
+    <div class="fig" id="figRestarts"><div class="value">·</div><div class="label">Restarts in last 5 minutes</div></div>
+    <div class="fig" id="figMem"><div class="value">·</div><div class="label">Highest pod memory, latest</div></div>
+  </section>
+
+  <section class="charts">
+    <article class="panel wide hero">
+      <h2>Error rate</h2>
+      <svg id="chartErr" role="img" aria-label="Error rate over time"></svg>
+      <div class="legend" id="legErr"></div>
+    </article>
+    <article class="panel">
+      <h2>p99 latency</h2>
+      <svg id="chartP99" role="img" aria-label="p99 latency over time"></svg>
+      <div class="legend" id="legP99"></div>
+    </article>
+    <article class="panel">
+      <h2>Restarts per 5 minutes</h2>
+      <svg id="chartRestarts" role="img" aria-label="Restarts over time"></svg>
+      <div class="legend" id="legRestarts"></div>
+    </article>
+    <article class="panel wide">
+      <h2>Memory working set by pod</h2>
+      <svg id="chartMem" role="img" aria-label="Memory working set by pod"></svg>
+      <div class="legend" id="legMem"></div>
+    </article>
+  </section>
+
+  <section class="incident" id="incident" hidden aria-labelledby="rcaHeading">
+    <div>
+      <h2 id="rcaHeading">Root cause</h2>
+      <p class="root" id="rcTitle"></p>
+      <p><span class="chip" id="rcConf"></span><span id="rcEvidence" class="chip"></span></p>
+      <p id="rcStatement" style="margin-top:10px"></p>
+      <h2 style="margin-top:24px">Five whys</h2>
+      <ol class="whys" id="whys"></ol>
+    </div>
+    <div>
+      <h2>Remediation</h2>
+      <p style="color:var(--ink-2);font-size:13px;margin-bottom:8px">Nothing runs automatically. Each change needs approval.</p>
+      <div id="rems"></div>
+      <h2 style="margin-top:24px">Open questions</h2>
+      <ul class="plain" id="openQs"></ul>
+      <h2 style="margin-top:24px">Findings</h2>
+      <table><thead><tr><th>Signature</th><th>Severity</th><th>Count</th><th>Pods</th></tr></thead><tbody id="findings"></tbody></table>
+      <p style="margin-top:16px"><a class="dl" id="mdLink" href="#" download>Download Markdown report</a></p>
+    </div>
+  </section>
+
+  <p class="status" id="status" role="status" aria-live="polite">Live metrics refresh every 30 seconds.</p>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const COLORS = ["#245C86", "#4E8BB0", "#7D8F9E", "#B1CBDB", "#3E4C59", "#5C7A6B"];
+  const RISK = {
+    read_only: "Read-only",
+    reversible: "Reversible, approval required",
+    disruptive: "Disruptive, change review required",
+  };
+  let currentNs = "", currentWl = "";
+
+  const $ = (sel) => document.querySelector(sel);
+  const el = (tag, text, cls) => {
+    const node = document.createElement(tag);
+    if (text != null) node.textContent = text;
+    if (cls) node.className = cls;
+    return node;
+  };
+  const setStatus = (text, isError = false) => {
+    const s = $("#status");
+    s.textContent = text;
+    s.classList.toggle("error", isError);
+  };
+
+  async function api(path, options) {
+    const res = await fetch(path, options);
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (_) {}
+      throw new Error(`${res.status}: ${detail}`);
+    }
+    return res.json();
+  }
+
+  function fmt(value, unit) {
+    if (!Number.isFinite(value)) return "·";
+    if (unit === "pct") return `${(value * 100).toFixed(value < 0.1 ? 2 : 1)}%`;
+    if (unit === "ms") return `${Math.round(value * 1000)} ms`;
+    if (unit === "bytes") {
+      if (value >= 1e9) return `${(value / 1e9).toFixed(2)} GB`;
+      if (value >= 1e6) return `${Math.round(value / 1e6)} MB`;
+      return `${Math.round(value / 1e3)} kB`;
+    }
+    return String(Math.round(value * 10) / 10);
+  }
+
+  function labelOf(name) {
+    const m = name.match(/\{(.*)\}$/);
+    return m ? m[1].replace(/^pod=/, "") : name;
+  }
+
+  function drawChart(svg, legendEl, series, unit) {
+    const W = 640, H = Number(svg.getAttribute("data-h")) || 200;
+    const m = { l: 60, r: 12, t: 10, b: 22 };
+    const parsed = series.map((s) => ({
+      label: labelOf(s.name),
+      pts: s.points.map(([t, v]) => [Date.parse(t), v]).filter(([t, v]) => Number.isFinite(t) && Number.isFinite(v)),
+    }));
+    const flat = parsed.flatMap((s) => s.pts);
+    legendEl.replaceChildren();
+    if (!flat.length) {
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.innerHTML = `<text x="${m.l}" y="${H / 2}" class="empty">No samples in this window.</text>`;
+      return;
+    }
+    const xMin = Math.min(...flat.map((p) => p[0])), xMax = Math.max(...flat.map((p) => p[0]));
+    const yMax = (Math.max(...flat.map((p) => p[1])) || 1) * 1.1;
+    const x = (t) => m.l + (xMax === xMin ? 0 : (t - xMin) / (xMax - xMin)) * (W - m.l - m.r);
+    const y = (v) => m.t + (1 - v / yMax) * (H - m.t - m.b);
+
+    let body = "";
+    for (let i = 0; i <= 3; i++) {
+      const v = (yMax * i) / 3, yy = y(v).toFixed(1);
+      body += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}"/>`;
+      body += `<text class="tick" x="${m.l - 8}" y="${Number(yy) + 4}" text-anchor="end">${fmt(v, unit)}</text>`;
+    }
+    parsed.slice(0, 12).forEach((s, i) => {
+      if (!s.pts.length) return;
+      const color = COLORS[i % COLORS.length];
+      const d = s.pts.map(([t, v]) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+      body += `<polyline fill="none" stroke="${color}" stroke-width="1.75" stroke-linejoin="round" points="${d}"/>`;
+      const sw = el("span", s.label);
+      sw.style.setProperty("--swatch", color);
+      legendEl.append(sw);
+    });
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.innerHTML = body;
+  }
+
+  const last = (series) => {
+    const vals = series.map((s) => s.points.at(-1)?.[1]).filter(Number.isFinite);
+    return vals.length ? vals : [];
+  };
+
+  function setFig(id, value, text, level) {
+    const node = $(id);
+    node.querySelector(".value").textContent = text;
+    node.classList.toggle("crit", level === "crit");
+    node.classList.toggle("warn", level === "warn");
+  }
+
+  async function refreshMetrics() {
+    if (!currentNs || document.hidden) return;
+    try {
+      const data = await api(`/api/metrics/overview?namespace=${encodeURIComponent(currentNs)}&minutes=${currentMinutes()}&step=60s`);
+      const by = (prefix) => data.series.filter((s) => s.name === prefix || s.name.startsWith(prefix + "{"));
+
+      const errSeries = by("error_rate");
+      const latSeries = by("p99_latency_seconds");
+      const restartSeries = by("restarts");
+      const memSeries = by("memory_working_set");
+
+      const errNow = last(errSeries)[0];
+      setFig("#figErr", errNow, fmt(errNow, "pct"), errNow > 0.01 ? "crit" : errNow > 0.001 ? "warn" : "");
+      const p99 = last(latSeries)[0];
+      setFig("#figP99", p99, fmt(p99, "ms"), p99 > 1 ? "warn" : "");
+      const restarts = last(restartSeries).reduce((a, b) => a + b, 0);
+      setFig("#figRestarts", restarts, String(Math.round(restarts)), restarts >= 3 ? "crit" : restarts > 0 ? "warn" : "");
+      const memPeak = Math.max(0, ...last(memSeries));
+      setFig("#figMem", memPeak, fmt(memPeak, "bytes"), "");
+
+      drawChart($("#chartErr"), $("#legErr"), errSeries, "pct");
+      drawChart($("#chartP99"), $("#legP99"), latSeries, "ms");
+      drawChart($("#chartRestarts"), $("#legRestarts"), restartSeries, "count");
+      drawChart($("#chartMem"), $("#legMem"), memSeries, "bytes");
+
+      setStatus(`Updated ${new Date().toLocaleTimeString()}. Live metrics refresh every 30 seconds.`);
+    } catch (err) {
+      setStatus(`Metrics unavailable. ${err.message}`, true);
+    }
+  }
+
+  const currentMinutes = () => Number(document.querySelector("select[name=minutes]").value);
+
+  function renderIncident(r) {
+    $("#incident").hidden = false;
+    const rc = r.root_cause;
+    $("#rcTitle").textContent = rc.title;
+    $("#rcConf").textContent = `Confidence: ${rc.confidence}`;
+    $("#rcEvidence").textContent = `Evidence: ${rc.evidence_ids.join(", ") || "none"}`;
+    $("#rcStatement").textContent = rc.statement;
+
+    const whys = $("#whys");
+    whys.replaceChildren();
+    r.five_whys.forEach((s) => {
+      const li = el("li", null, s.verified ? "" : "open");
+      li.append(el("div", s.question));
+      li.append(el("div", s.answer));
+      li.append(el("div", s.verified ? `Evidence: ${s.evidence_ids.join(", ")}` : "Not established", "ev"));
+      whys.append(li);
+    });
+
+    const rems = $("#rems");
+    rems.replaceChildren();
+    r.remediations.forEach((rem) => {
+      const box = el("div", null, "rem");
+      box.append(el("p", rem.title, "strong-line"));
+      box.append(el("span", RISK[rem.risk] || rem.risk, "chip"));
+      box.append(el("p", rem.rationale));
+      if (rem.preconditions.length) {
+        const ul = el("ul", null, "plain");
+        rem.preconditions.forEach((p) => ul.append(el("li", p)));
+        box.append(el("p", "Preconditions", "ev"), ul);
+      }
+      if (rem.commands.length) {
+        const pre = el("pre");
+        pre.append(el("code", rem.commands.join("\n")));
+        box.append(pre);
+      }
+      if (rem.rollback.length) {
+        const pre = el("pre");
+        pre.append(el("code", "Rollback:\n" + rem.rollback.join("\n")));
+        box.append(pre);
+      }
+      rems.append(box);
+    });
+
+    const qs = $("#openQs");
+    qs.replaceChildren();
+    r.open_questions.forEach((q) => qs.append(el("li", q)));
+
+    const tbody = $("#findings");
+    tbody.replaceChildren();
+    if (!r.findings.length) {
+      const tr = el("tr");
+      tr.append(el("td", "No error signatures matched."));
+      tbody.append(tr);
+    }
+    r.findings.forEach((f) => {
+      const tr = el("tr");
+      [f.signature, f.severity, String(f.count), String(f.pods.length)].forEach((v) => tr.append(el("td", v)));
+      tbody.append(tr);
+    });
+
+    const link = $("#mdLink");
+    link.href = `/api/incidents/${encodeURIComponent(r.incident_id)}/markdown`;
+    link.textContent = `Download ${r.incident_id}.md`;
+  }
+
+  $("#scopeForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!form.reportValidity()) return;
+    const body = {
+      namespace: form.namespace.value.trim(),
+      workload: form.workload.value.trim(),
+      minutes: Number(form.minutes.value),
+    };
+    const btn = $("#runBtn");
+    btn.disabled = true;
+    setStatus("Analyzing. Pulling logs, events, and metrics.");
+    try {
+      const report = await api("/api/analyze", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      currentNs = body.namespace;
+      currentWl = body.workload;
+      $("#scope").textContent = `${currentNs} / ${currentWl}, last ${body.minutes} minutes`;
+      renderIncident(report);
+      await refreshMetrics();
+      setStatus(`Analysis complete (${report.analysis_mode}). Metrics refresh every 30 seconds.`);
+    } catch (err) {
+      setStatus(`Analysis failed. ${err.message}`, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("select[name=minutes]").addEventListener("change", refreshMetrics);
+  setInterval(refreshMetrics, 30000);
+})();
+</script>
+</body>
+</html>

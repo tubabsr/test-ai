@@ -1,0 +1,120 @@
+# Deploys the SRE agent. Its RBAC is deliberately read-only: no create, update,
+# patch, or delete verbs anywhere. Remediation is recommended, never applied.
+#
+# Logs can contain sensitive data. For production, prefer one RoleBinding per
+# namespace (instead of the ClusterRoleBinding below) so the agent reads only the
+# namespaces it is responsible for.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sre-agent
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sre-agent
+  namespace: sre-agent
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sre-agent-readonly
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sre-agent-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sre-agent-readonly
+subjects:
+  - kind: ServiceAccount
+    name: sre-agent
+    namespace: sre-agent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sre-agent
+  namespace: sre-agent
+  labels:
+    app: sre-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sre-agent
+  template:
+    metadata:
+      labels:
+        app: sre-agent
+    spec:
+      serviceAccountName: sre-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/your-org/k8s-sre-agent:0.1.0   # replace with your registry
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "sre_agent.api:app", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LOKI_URL
+              value: http://loki-gateway.monitoring.svc:80
+            - name: PROMETHEUS_URL
+              value: http://prometheus-operated.monitoring.svc:9090
+            - name: ANTHROPIC_MODEL
+              value: claude-sonnet-5-5
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sre-agent-secrets
+                  key: anthropic-api-key
+                  optional: true   # without a key the agent runs fully deterministic
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-agent
+  namespace: sre-agent
+spec:
+  selector:
+    app: sre-agent
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  # Expose only through an authenticating ingress or proxy (for example OAuth2 Proxy).
+  type: ClusterIP
