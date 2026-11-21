@@ -3,5 +3,5 @@
 # The packages below are needed for the API, cluster access, and live queries.
 fastapi>=0.110
 uvicorn>=0.29
-httpx>=0.27
+httpx>=0.28.1
 kubernetes>=29.0
